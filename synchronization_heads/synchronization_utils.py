@@ -1,8 +1,5 @@
-from sklearn.model_selection import train_test_split
 import torch
-from torch.utils.data import DataLoader
 import pandas as pd
-import itertools
 import numpy as np
 import torch.nn as nn
 import datetime
@@ -560,3 +557,65 @@ def initialize_parameters(SENSORS, WINDOW_LENGTHS, NUM_CHANNELS, C_sync=16, C_ne
         SENSORS, candidate_parameters_sensor_dict, syncron_window_length, C_network, C_sync, NUM_CHANNELS)
 
     return sensor_syncron_parameters
+
+
+class create_fc_head(nn.Module):
+    """
+    A fully-connected (FC) head that operates channel by channel.
+
+    This can be used for:
+      - Synchronization: map from a sensor's raw length L_sensor to a common length L_common.
+      - Projection: map from the common length L_common back to L_sensor.
+    
+    Shape:
+        - Input:  (N, C, L_in)
+        - Output: (N, C, L_out)
+    """
+
+    def __init__(self, input_size, output_size, num_channels, num_layers):
+        """
+        Args:
+            input_size (int): L_in
+            output_size (int): L_out
+            num_channels (int): C
+            num_layers (int): number of FC layers per channel
+        """
+        super(create_fc_head, self).__init__()
+        self.fc_stacks = nn.ModuleList()
+
+        # Create channel-specific FC stacks
+        for _ in range(num_channels):
+            layers = []
+            current_size = input_size
+            for layer_idx in range(num_layers):
+                # FC layer
+                fc = nn.Linear(current_size, output_size)
+                layers.append(fc)
+
+                # Add ReLU + BatchNorm except after the last layer
+                if layer_idx < num_layers - 1:
+                    layers.append(nn.ReLU())
+                    layers.append(nn.BatchNorm1d(output_size))
+
+                current_size = output_size
+
+            # Wrap in a Sequential
+            self.fc_stacks.append(nn.Sequential(*layers))
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): (N, C, L_in)
+        
+        Returns:
+            torch.Tensor: (N, C, L_out)
+        """
+        outputs = []
+        for c in range(x.size(1)):
+            # Channel slice => (N, L_in)
+            channel_input = x[:, c, :]
+            channel_output = self.fc_stacks[c](channel_input)  # (N, L_out)
+            outputs.append(channel_output.unsqueeze(1))        # (N, 1, L_out)
+
+        # Concat the per-channel outputs => (N, C, L_out)
+        return torch.cat(outputs, dim=1)

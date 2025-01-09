@@ -3,6 +3,8 @@ import pandas as pd
 import torch
 import h5py
 from torch.utils.data import Dataset
+import torch.nn as nn
+
 
 def sensor_specific_loss(criterion, x_batch_concat, x_batch_estimate, WINDOW_LENGTHS, NUM_CHANNELS):
     """
