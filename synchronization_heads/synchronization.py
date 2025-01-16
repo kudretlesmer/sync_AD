@@ -15,7 +15,6 @@ import numpy as np
 import utilities
 import synchronization_heads.synchronization_utils as synchronization_utils
 
-
 class SynchronizationBlock(nn.Module):
     """
     Resamples/synchronizes each sensor’s data to a common length L_common.
@@ -29,25 +28,22 @@ class SynchronizationBlock(nn.Module):
         c_sync,
         sync_head_conv_parameters,
         params,
-        sync_method,
+        synchronization_method,
         window_lengths,
         fc_num_layers
     ):
-        super(SynchronizationBlock, self).__init__()
+        super().__init__()  # Corrected this line
         self.default_device = params['device']
 
-        # L_common for conv-based might come from sync_head_conv_parameters[...]['input_2']
-        # for FC-based, you can choose an L_common or store in sync_head_conv_parameters as well
-        self.sync_window_length = sync_head_conv_parameters[
+        self.L_common = sync_head_conv_parameters[
             list(sync_head_conv_parameters.keys())[0]]['input_2']
 
         self.total_channels = sum(num_channels.values())
         self.c_sync = c_sync
-        self.sync_method = sync_method
+        self.synchronization_method = synchronization_method
         self.window_lengths = window_lengths
 
-        if sync_method == 'sync_head_conv':
-            # Example conv-based approach (via some sync_head_conv_utils)
+        if synchronization_method == 'sync_head_conv':
             self.sync_heads = nn.ModuleList([
                 synchronization_utils.create_synchronization_head(
                     input_sensor_channels=num_channels[sensor],
@@ -60,33 +56,32 @@ class SynchronizationBlock(nn.Module):
             ])
             self._sync_fn = self._resample_sync_head_conv
 
-        elif sync_method == 'sync_head_fc':
-            # FC-based approach (unified create_fc_head)
+        elif synchronization_method == 'sync_head_fc':
             self.sync_heads = nn.ModuleList([
                 create_fc_head(
                     input_size=window_lengths[sensor],      # L_in (raw)
-                    output_size=self.sync_window_length,    # L_out (common)
+                    output_size=self.L_common,    # L_out (common)
                     num_channels=num_channels[sensor],
-                    num_layers=fc_num_layers  # or more, user choice
+                    num_layers=fc_num_layers
                 )
                 for sensor in sensors
             ])
             self._sync_fn = self._resample_sync_head_fc
 
-        elif sync_method == 'resample_interp':
+        elif synchronization_method == 'resample_interp':
             self.sync_heads = None
             self._sync_fn = self._resample_interp
 
-        elif sync_method == 'resample_fft':
+        elif synchronization_method == 'resample_fft':
             self.sync_heads = None
             self._sync_fn = self._resample_fft
 
-        elif sync_method == 'zeropad':
+        elif synchronization_method == 'zeropad':
             self.sync_heads = None
             self._sync_fn = self._resample_zeropad
 
         else:
-            raise ValueError(f"Unknown sync_method: {sync_method}")
+            raise ValueError(f"Unknown synchronization_method: {synchronization_method}")
 
     def forward(self, input_data_list):
         """
@@ -95,18 +90,12 @@ class SynchronizationBlock(nn.Module):
         """
         return self._sync_fn(input_data_list)
 
-    # --------------------------------------------------------------------------
-    # Different synchronization methods
-    # --------------------------------------------------------------------------
-
     def _resample_sync_head_conv(self, input_data_list):
-        # Just cat outputs from each conv-based head
         return torch.cat([
             head(inp) for head, inp in zip(self.sync_heads, input_data_list)
         ], dim=1)
 
     def _resample_sync_head_fc(self, input_data_list):
-        # Cat outputs from each fc-based head
         return torch.cat([
             head(inp) for head, inp in zip(self.sync_heads, input_data_list)
         ], dim=1)
@@ -115,7 +104,7 @@ class SynchronizationBlock(nn.Module):
         input_data_list = [inp.cpu() for inp in input_data_list]
         resampled = [
             F.interpolate(
-                inp, size=self.sync_window_length, mode='linear'
+                inp, size=self.L_common, mode='linear'
             ).to(self.default_device)
             for inp in input_data_list
         ]
@@ -123,7 +112,7 @@ class SynchronizationBlock(nn.Module):
 
     def _fft_resample_single(self, input_data):
         fft_vals = torch.fft.fft(input_data, dim=-1)
-        L_new = self.sync_window_length
+        L_new = self.L_common
         L = input_data.size(-1)
 
         if L_new > L:
@@ -146,15 +135,15 @@ class SynchronizationBlock(nn.Module):
         padded_data = []
         for inp in input_data_list:
             B, C, L = inp.shape
-            if L < self.sync_window_length:
-                pad_size = self.sync_window_length - L
+            if L < self.L_common:
+                pad_size = self.L_common - L
                 inp_padded = F.pad(inp, (0, pad_size), "constant", 0)
             else:
-                inp_padded = inp[..., :self.sync_window_length]
+                inp_padded = inp[..., :self.L_common]
             padded_data.append(inp_padded)
         return torch.cat(padded_data, dim=1)
 
-class Desynchronization(nn.Module):
+class DesynchronizationBlock(nn.Module):
     """
     Projects the fused representation (common length L_common)
     back to each sensor's original length L_sensor (or to any desired L_out).
@@ -166,18 +155,18 @@ class Desynchronization(nn.Module):
         sensors,
         num_channels,
         c_sync,
+        params,
         sync_head_conv_parameters,
         desynchronization_method='conv',
         fc_num_layers=1,
         window_lengths=None
     ):
-        super(Desynchronization, self).__init__()
+        super().__init__()  # Corrected this line
         self.sensors = sensors
         self.num_channels = num_channels
         self.c_sync = c_sync
         self.total_channels = sum(num_channels.values())
 
-        # For slicing out each sensor's portion from the fused feature map
         channel_sizes = [num_channels[sensor] * self.c_sync for sensor in sensors]
         cumulative_offsets = [0] + list(accumulate(channel_sizes))[:-1]
         self.proj_slices = [
@@ -187,7 +176,6 @@ class Desynchronization(nn.Module):
 
         self.proj_heads = nn.ModuleList()
         if desynchronization_method == 'conv':
-            # Use existing sync_head_utils in "output" mode (conv-based)
             for sensor in sensors:
                 out_params = synchronization_utils.invert_synchronization_head_parameters(
                     sync_head_conv_parameters[sensor]
@@ -203,7 +191,6 @@ class Desynchronization(nn.Module):
             self._proj_fn = self._proj_fn_conv
 
         elif desynchronization_method == 'fc':
-            # Use the unified FC-based approach
             if window_lengths is None:
                 raise ValueError("For 'fc' desynchronization, you need `window_lengths`.")
             for sensor in sensors:
@@ -242,7 +229,6 @@ class Desynchronization(nn.Module):
             sensor_desynchronizations.append(sensor_out)
         return sensor_desynchronizations
 
-
 class create_fc_head(nn.Module):
     """
     A fully-connected (FC) head that operates channel by channel.
@@ -264,26 +250,22 @@ class create_fc_head(nn.Module):
             num_channels (int): C
             num_layers (int): number of FC layers per channel
         """
-        super(create_fc_head, self).__init__()
+        super().__init__()  # Corrected this line
         self.fc_stacks = nn.ModuleList()
 
-        # Create channel-specific FC stacks
         for _ in range(num_channels):
             layers = []
             current_size = input_size
             for layer_idx in range(num_layers):
-                # FC layer
                 fc = nn.Linear(current_size, output_size)
                 layers.append(fc)
 
-                # Add ReLU + BatchNorm except after the last layer
                 if layer_idx < num_layers - 1:
                     layers.append(nn.ReLU())
                     layers.append(nn.BatchNorm1d(output_size))
 
                 current_size = output_size
 
-            # Wrap in a Sequential
             self.fc_stacks.append(nn.Sequential(*layers))
 
     def forward(self, x):
@@ -296,10 +278,8 @@ class create_fc_head(nn.Module):
         """
         outputs = []
         for c in range(x.size(1)):
-            # Channel slice => (N, L_in)
             channel_input = x[:, c, :]
-            channel_output = self.fc_stacks[c](channel_input)  # (N, L_out)
-            outputs.append(channel_output.unsqueeze(1))        # (N, 1, L_out)
+            channel_output = self.fc_stacks[c](channel_input)
+            outputs.append(channel_output.unsqueeze(1))
 
-        # Concat the per-channel outputs => (N, C, L_out)
         return torch.cat(outputs, dim=1)

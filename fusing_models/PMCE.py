@@ -9,9 +9,9 @@ class PMCE(nn.Module):
     to the masked input, effectively fusing the masked representations.
     """
 
-    def __init__(self, total_channels, c_sync, c_fuse, kernel_size, sensors, num_channels):
+    def __init__(self, c_sync, c_fuse, kernel_size, sensors, num_channels):
         super(PMCE, self).__init__()
-        self.total_channels = total_channels
+        self.total_channels = sum(num_channels.values())
         self.c_sync = c_sync
 
         # After sync, shape => (B, C_total*c_sync, L)

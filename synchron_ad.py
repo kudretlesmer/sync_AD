@@ -3,7 +3,7 @@ import torch.nn as nn
 import tqdm
 
 from synchronization_heads.synchronization import SynchronizationBlock
-from synchronization_heads.synchronization import Desynchronization
+from synchronization_heads.synchronization import DesynchronizationBlock
 from fusing_models.PMCE import PMCE
 from fusing_models.RMCE import RMCE
 
@@ -24,8 +24,8 @@ class SynchronMaskEstimator(nn.Module):
         c_fuse,
         kernel_size,
         params,
-        sync_method,
         sync_head_conv_parameters,
+        sync_method,
         desynchronization_method='conv',
         fc_num_layers=1,
         fusing_block_type='PMCE'  
@@ -42,7 +42,7 @@ class SynchronMaskEstimator(nn.Module):
         self.total_channels = sum(num_channels.values())
 
         # 1) Synchronization block
-        self.synchronizer = SynchronizationBlock(
+        self.synchronization_block = SynchronizationBlock(
             sensors=sensors,
             num_channels=num_channels,
             c_sync=c_sync,
@@ -76,7 +76,7 @@ class SynchronMaskEstimator(nn.Module):
             raise ValueError(f"Unknown fusing_block_type: {fusing_block_type}")
 
         # 3) Desynchronization (desynchronization) block
-        self.desynchronization_block = Desynchronization(
+        self.desynchronization_block = DesynchronizationBlock(
             sensors=sensors,
             num_channels=num_channels,
             c_sync=c_sync,
@@ -95,10 +95,10 @@ class SynchronMaskEstimator(nn.Module):
         returns: list of (B, C_sensor, L_sensor)
         """
         # Step 1: Synchronize & concat => (B, C_total*c_sync, L_common)
-        synced_data = self.synchronizer(input_data_list)
+        synced_data = self.synchronization_block(input_data_list)
 
         # Step 2: Fuse => (B, C_total*c_sync, L_common)
-        #fused_output = self.fusing_block(synced_data)
+        fused_output = self.fusing_block(synced_data)
 
         # Step 3: Project back => list of (B, C_sensor, L_sensor)
         sensor_outputs = self.desynchronization_block(synced_data)
