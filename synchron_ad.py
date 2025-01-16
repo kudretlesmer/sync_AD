@@ -26,7 +26,7 @@ class SynchronMaskEstimator(nn.Module):
         params,
         sync_method,
         sync_head_conv_parameters,
-        projection_method='conv',
+        desynchronization_method='conv',
         fc_num_layers=1,
         fusing_block_type='PMCE'  
         # You can add more parameters here if needed.
@@ -75,13 +75,13 @@ class SynchronMaskEstimator(nn.Module):
         else:
             raise ValueError(f"Unknown fusing_block_type: {fusing_block_type}")
 
-        # 3) Desynchronization (projection) block
-        self.projection_block = Desynchronization(
+        # 3) Desynchronization (desynchronization) block
+        self.desynchronization_block = Desynchronization(
             sensors=sensors,
             num_channels=num_channels,
             c_sync=c_sync,
             sync_head_conv_parameters=sync_head_conv_parameters,
-            projection_method=projection_method,
+            desynchronization_method=desynchronization_method,
             fc_num_layers=fc_num_layers,
             window_lengths=window_lengths
         )
@@ -98,10 +98,10 @@ class SynchronMaskEstimator(nn.Module):
         synced_data = self.synchronizer(input_data_list)
 
         # Step 2: Fuse => (B, C_total*c_sync, L_common)
-        fused_output = self.fusing_block(synced_data)
+        #fused_output = self.fusing_block(synced_data)
 
         # Step 3: Project back => list of (B, C_sensor, L_sensor)
-        sensor_outputs = self.projection_block(fused_output)
+        sensor_outputs = self.desynchronization_block(synced_data)
 
         return sensor_outputs
 
@@ -228,18 +228,25 @@ class SynchronMaskEstimator(nn.Module):
     def predict(self, data_loader):
         """
         A simple helper method for inference/reconstruction on a given DataLoader.
-        Returns a list of input batches and a list of output batches (one entry per batch).
+        Returns a list of input tensors and a list of output tensors (concatenated across all batches).
         """
         self.eval()
+        all_inputs = [[] for _ in range(len(self.sensors))]
+        all_outputs = [[] for _ in range(len(self.sensors))]
+
         with torch.no_grad():
-            for batch_idx, x_batch in enumerate(data_loader):
+            for x_batch in data_loader:
                 x_batch = [x.to(self.default_device) for x in x_batch]
-                if batch_idx == 0:
-                    out = self(x_batch)
-                    inputs = x_batch
-                else:
-                    out_buffer = self(x_batch)
-                    for sensor_idx in range(len(out)):
-                        out[sensor_idx] = torch.cat([out[sensor_idx], out_buffer[sensor_idx]], dim=0)
-                        inputs[sensor_idx] = torch.cat([inputs[sensor_idx], x_batch[sensor_idx]], dim=0)
-        return [i.cpu() for i in inputs], [o.cpu() for o in out]
+                out_batch = self(x_batch)
+
+                for sensor_idx in range(len(self.sensors)):
+                    all_inputs[sensor_idx].append(x_batch[sensor_idx].detach().cpu())
+                    all_outputs[sensor_idx].append(out_batch[sensor_idx].detach().cpu())
+
+
+        # Perform final concatenation on CPU
+        all_inputs = [torch.cat(tensors, dim=0) for tensors in all_inputs]
+        all_outputs = [torch.cat(tensors, dim=0) for tensors in all_outputs]
+        del x_batch, out_batch
+
+        return all_inputs, all_outputs

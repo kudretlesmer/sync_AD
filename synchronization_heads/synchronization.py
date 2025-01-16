@@ -167,7 +167,7 @@ class Desynchronization(nn.Module):
         num_channels,
         c_sync,
         sync_head_conv_parameters,
-        projection_method='conv',
+        desynchronization_method='conv',
         fc_num_layers=1,
         window_lengths=None
     ):
@@ -186,7 +186,7 @@ class Desynchronization(nn.Module):
         ]
 
         self.proj_heads = nn.ModuleList()
-        if projection_method == 'conv':
+        if desynchronization_method == 'conv':
             # Use existing sync_head_utils in "output" mode (conv-based)
             for sensor in sensors:
                 out_params = synchronization_utils.invert_synchronization_head_parameters(
@@ -202,10 +202,10 @@ class Desynchronization(nn.Module):
                 self.proj_heads.append(proj_head)
             self._proj_fn = self._proj_fn_conv
 
-        elif projection_method == 'fc':
+        elif desynchronization_method == 'fc':
             # Use the unified FC-based approach
             if window_lengths is None:
-                raise ValueError("For 'fc' projection, you need `window_lengths`.")
+                raise ValueError("For 'fc' desynchronization, you need `window_lengths`.")
             for sensor in sensors:
                 L_common = sync_head_conv_parameters[sensor]['input_2']
                 L_sensor = window_lengths[sensor]
@@ -219,7 +219,7 @@ class Desynchronization(nn.Module):
             self._proj_fn = self._proj_fn_fc
 
         else:
-            raise ValueError(f"Unknown projection_method: {projection_method}")
+            raise ValueError(f"Unknown desynchronization_method: {desynchronization_method}")
 
     def forward(self, fused_output):
         """
@@ -229,18 +229,18 @@ class Desynchronization(nn.Module):
         return self._proj_fn(fused_output)
 
     def _proj_fn_conv(self, fused_output):
-        sensor_projections = []
+        sensor_desynchronizations = []
         for proj_head, sl in zip(self.proj_heads, self.proj_slices):
             sensor_out = proj_head(fused_output[:, sl, :])
-            sensor_projections.append(sensor_out)
-        return sensor_projections
+            sensor_desynchronizations.append(sensor_out)
+        return sensor_desynchronizations
 
     def _proj_fn_fc(self, fused_output):
-        sensor_projections = []
+        sensor_desynchronizations = []
         for proj_head, sl in zip(self.proj_heads, self.proj_slices):
             sensor_out = proj_head(fused_output[:, sl, :])
-            sensor_projections.append(sensor_out)
-        return sensor_projections
+            sensor_desynchronizations.append(sensor_out)
+        return sensor_desynchronizations
 
 
 class create_fc_head(nn.Module):
@@ -249,7 +249,7 @@ class create_fc_head(nn.Module):
 
     This can be used for:
       - Synchronization: map from a sensor's raw length L_sensor to a common length L_common.
-      - Projection: map from the common length L_common back to L_sensor.
+      - desynchronization: map from the common length L_common back to L_sensor.
     
     Shape:
         - Input:  (N, C, L_in)

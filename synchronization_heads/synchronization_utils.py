@@ -565,7 +565,7 @@ class create_fc_head(nn.Module):
 
     This can be used for:
       - Synchronization: map from a sensor's raw length L_sensor to a common length L_common.
-      - Projection: map from the common length L_common back to L_sensor.
+      - desynchronization: map from the common length L_common back to L_sensor.
     
     Shape:
         - Input:  (N, C, L_in)
