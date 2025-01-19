@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
+from scipy.interpolate import make_interp_spline
 
 # Custom imports
 import utilities
@@ -18,7 +19,7 @@ import synchronization_heads.synchronization_utils as synchronization_utils
 class SynchronizationBlock(nn.Module):
     """
     Resamples/synchronizes each sensor’s data to a common length L_common.
-    Multiple methods: 'sync_head_conv', 'sync_head_fc', 'resample_interp', etc.
+    Multiple methods: 'sync_head_conv', 'sync_head_fc', 'resample_linear', etc.
     """
 
     def __init__(
@@ -50,7 +51,6 @@ class SynchronizationBlock(nn.Module):
                     output_sensor_channels=c_sync * num_channels[sensor],
                     groups=num_channels[sensor],
                     parameters=sync_head_conv_parameters[sensor],
-                    type='input'
                 )
                 for sensor in sensors
             ])
@@ -68,9 +68,9 @@ class SynchronizationBlock(nn.Module):
             ])
             self._sync_fn = self._resample_sync_head_fc
 
-        elif synchronization_method == 'resample_interp':
+        elif synchronization_method == 'resample_linear':
             self.sync_heads = None
-            self._sync_fn = self._resample_interp
+            self._sync_fn = self._resample_linear
 
         elif synchronization_method == 'resample_fft':
             self.sync_heads = None
@@ -80,6 +80,9 @@ class SynchronizationBlock(nn.Module):
             self.sync_heads = None
             self._sync_fn = self._resample_zeropad
 
+        elif synchronization_method == 'resample_spline':
+            self.sync_heads = None
+            self._sync_fn = self._resample_spline
         else:
             raise ValueError(f"Unknown synchronization_method: {synchronization_method}")
 
@@ -100,7 +103,7 @@ class SynchronizationBlock(nn.Module):
             head(inp) for head, inp in zip(self.sync_heads, input_data_list)
         ], dim=1)
 
-    def _resample_interp(self, input_data_list):
+    def _resample_linear(self, input_data_list):
         input_data_list = [inp.cpu() for inp in input_data_list]
         resampled = [
             F.interpolate(
@@ -109,6 +112,45 @@ class SynchronizationBlock(nn.Module):
             for inp in input_data_list
         ]
         return torch.cat(resampled, dim=1)
+
+    def _resample_spline(self, input_data_list):
+        """
+        input_data_list: list of Tensors, each (B, C, T)
+        self.L_common: target length for time dimension
+        self.default_device: 'cpu', 'cuda', or 'mps'
+        
+        Returns: (B, sum_of_C, self.L_common)
+        """
+        resampled_list = []
+        
+        for inp in input_data_list:
+            # Convert to float32 on CPU
+            arr = inp.float().cpu().numpy()  # shape: (B, C, T)
+            B, C, T = arr.shape
+            
+            # Original and new time points
+            x = np.arange(T, dtype=np.float32)
+            x_new = np.linspace(0, T - 1, self.L_common, dtype=np.float32)
+            
+            # Flatten to (B*C, T) so each row is one signal
+            arr_flat = arr.reshape(B * C, T)
+            
+            spline = make_interp_spline(x, arr_flat, axis=1, k=3)
+            
+            # Evaluate spline => (B*C, L_common)
+            arr_resampled_flat = spline(x_new)
+            
+            # Reshape back to (B, C, L_common), ensure float32
+            arr_resampled = arr_resampled_flat.reshape(B, C, self.L_common).astype(np.float32)
+            
+            # Convert to torch on target device
+            resampled_list.append(torch.from_numpy(arr_resampled).to(self.default_device))
+
+        # Concatenate along channel => (B, sum_of_C, L_common)
+        return torch.cat(resampled_list, dim=1)
+
+
+
 
     def _fft_resample_single(self, input_data):
         fft_vals = torch.fft.fft(input_data, dim=-1)
@@ -184,8 +226,7 @@ class DesynchronizationBlock(nn.Module):
                     input_sensor_channels=c_sync * num_channels[sensor],
                     output_sensor_channels=num_channels[sensor],
                     groups=num_channels[sensor],
-                    parameters=out_params,
-                    type='output'
+                    parameters=out_params
                 )
                 self.proj_heads.append(proj_head)
             self._proj_fn = self._proj_fn_conv

@@ -143,122 +143,6 @@ def generate_combinations(solution_space):
     return out
 
 
-def create_synchronization_head(input_sensor_channels, output_sensor_channels, groups, parameters, type='input'):
-    """
-    Creates a two-layer convolution-based model (either Conv1d or ConvTranspose1d) with batch normalization 
-    and ReLU activation after the first layer. If 'type' is 'input', it also applies batch normalization 
-    and ReLU after the second layer.
-
-    The architecture:
-        Layer 1: Conv1d or ConvTranspose1d
-        BatchNorm1d
-        ReLU
-        Layer 2: Conv1d or ConvTranspose1d
-        (If type='input'):
-            BatchNorm1d
-            ReLU
-
-    Parameters:
-        input_sensor_channels (int): Number of input channels from the input sensor.
-        output_sensor_channels (int): Number of output channels to produce.
-        parameters (pd.Series or dict): Should contain keys:
-            type_1, kernel_size_1, stride_1, padding_1, dilation_1
-            type_2, kernel_size_2, stride_2, padding_2, dilation_2
-            Each type_* can be either 'conv' or 'conv_transpose'.
-
-        type (str): 
-            - 'input': The model transforms input_sensor_channels -> output_sensor_channels
-            - 'output': The model transforms output_sensor_channels -> input_sensor_channels
-
-        fuse_channels (bool): 
-            If True, use groups=1 (all channels fused).
-            If False, use groups=input_sensor_channels (grouped convolution).
-
-    Returns:
-        nn.Sequential: A sequential model composed of:
-            - Conv/ConvTranspose layer
-            - BatchNorm1d
-            - ReLU
-            - Conv/ConvTranspose layer
-            - If type='input':
-                - BatchNorm1d
-                - ReLU
-    """
-
-    # Extract parameters for the first layer
-    layer_1_type = parameters['type_1']
-    kernel_size_1 = parameters['kernel_size_1']
-    stride_1 = parameters['stride_1']
-    padding_1 = parameters['padding_1']
-    dilation_1 = parameters['dilation_1']
-
-    layer_2_type = parameters['type_2']
-    kernel_size_2 = parameters['kernel_size_2']
-    stride_2 = parameters['stride_2']
-    padding_2 = parameters['padding_2']
-    dilation_2 = parameters['dilation_2']
-
-    # Create the first layer
-    if layer_1_type == 'conv':
-        layer_1 = nn.Conv1d(
-            in_channels=input_sensor_channels,
-            out_channels=output_sensor_channels,
-            kernel_size=kernel_size_1,
-            stride=stride_1,
-            padding=padding_1,
-            dilation=dilation_1,
-            groups=groups
-        )
-    else:
-        layer_1 = nn.ConvTranspose1d(
-            in_channels=input_sensor_channels,
-            out_channels=output_sensor_channels,
-            kernel_size=kernel_size_1,
-            stride=stride_1,
-            padding=padding_1,
-            dilation=dilation_1,
-            groups=groups
-        )
-
-    # Batch normalization and ReLU after first layer
-
-    relu1 = nn.ReLU()
-    bn1 = nn.BatchNorm1d(num_features=output_sensor_channels)
-
-    # Create the second layer
-    if layer_2_type == 'conv':
-        layer_2 = nn.Conv1d(
-            in_channels=output_sensor_channels,
-            out_channels=output_sensor_channels,
-            kernel_size=kernel_size_2,
-            stride=stride_2,
-            padding=padding_2,
-            dilation=dilation_2,
-            groups=groups
-        )
-    else:
-        layer_2 = nn.ConvTranspose1d(
-            in_channels=output_sensor_channels,
-            out_channels=output_sensor_channels,
-            kernel_size=kernel_size_2,
-            stride=stride_2,
-            padding=padding_2,
-            dilation=dilation_2,
-            groups=groups
-        )
-
-    # Build the layers into a list first
-    layers = [layer_1, relu1, bn1, layer_2]
-
-    # If type='input', add BatchNorm and ReLU after the second layer as well
-    if type == 'input':
-        relu2 = nn.ReLU()
-        bn2 = nn.BatchNorm1d(num_features=output_sensor_channels)
-        layers.extend([relu2, bn2])
-
-    # Return the final sequential model
-    return nn.Sequential(*layers)
-
 
 def invert_synchronization_head_parameters(parameters):
     """
@@ -558,6 +442,114 @@ def initialize_parameters(SENSORS, WINDOW_LENGTHS, NUM_CHANNELS, C_sync=16, C_ne
 
     return sensor_syncron_parameters
 
+def create_synchronization_head(input_sensor_channels, output_sensor_channels, groups, parameters):
+    """
+    Creates a two-layer convolution-based model (either Conv1d or ConvTranspose1d) with batch normalization 
+    and ReLU activation after the first layer. If 'type' is 'input', it also applies batch normalization 
+    and ReLU after the second layer.
+
+    The architecture:
+        Layer 1: Conv1d or ConvTranspose1d
+        BatchNorm1d
+        ReLU
+        Layer 2: Conv1d or ConvTranspose1d
+        (If type='input'):
+            BatchNorm1d
+            ReLU
+
+    Parameters:
+        input_sensor_channels (int): Number of input channels from the input sensor.
+        output_sensor_channels (int): Number of output channels to produce.
+        parameters (pd.Series or dict): Should contain keys:
+            type_1, kernel_size_1, stride_1, padding_1, dilation_1
+            type_2, kernel_size_2, stride_2, padding_2, dilation_2
+            Each type_* can be either 'conv' or 'conv_transpose'.
+
+        type (str): 
+            - 'input': The model transforms input_sensor_channels -> output_sensor_channels
+            - 'output': The model transforms output_sensor_channels -> input_sensor_channels
+
+        fuse_channels (bool): 
+            If True, use groups=1 (all channels fused).
+            If False, use groups=input_sensor_channels (grouped convolution).
+
+    Returns:
+        nn.Sequential: A sequential model composed of:
+            - Conv/ConvTranspose layer
+            - BatchNorm1d
+            - ReLU
+            - Conv/ConvTranspose layer
+            - If type='input':
+                - BatchNorm1d
+                - ReLU
+    """
+
+    # Extract parameters for the first layer
+    layer_1_type = parameters['type_1']
+    kernel_size_1 = parameters['kernel_size_1']
+    stride_1 = parameters['stride_1']
+    padding_1 = parameters['padding_1']
+    dilation_1 = parameters['dilation_1']
+
+    layer_2_type = parameters['type_2']
+    kernel_size_2 = parameters['kernel_size_2']
+    stride_2 = parameters['stride_2']
+    padding_2 = parameters['padding_2']
+    dilation_2 = parameters['dilation_2']
+
+    # Create the first layer
+    if layer_1_type == 'conv':
+        layer_1 = nn.Conv1d(
+            in_channels=input_sensor_channels,
+            out_channels=output_sensor_channels,
+            kernel_size=kernel_size_1,
+            stride=stride_1,
+            padding=padding_1,
+            dilation=dilation_1,
+            groups=groups
+        )
+    else:
+        layer_1 = nn.ConvTranspose1d(
+            in_channels=input_sensor_channels,
+            out_channels=output_sensor_channels,
+            kernel_size=kernel_size_1,
+            stride=stride_1,
+            padding=padding_1,
+            dilation=dilation_1,
+            groups=groups
+        )
+
+    # Batch normalization and ReLU after first layer
+
+    relu1 = nn.ReLU()
+    bn1 = nn.BatchNorm1d(num_features=output_sensor_channels)
+    # Create the second layer
+    if layer_2_type == 'conv':
+        layer_2 = nn.Conv1d(
+            in_channels=output_sensor_channels,
+            out_channels=output_sensor_channels,
+            kernel_size=kernel_size_2,
+            stride=stride_2,
+            padding=padding_2,
+            dilation=dilation_2,
+            groups=groups
+        )
+    else:
+        layer_2 = nn.ConvTranspose1d(
+            in_channels=output_sensor_channels,
+            out_channels=output_sensor_channels,
+            kernel_size=kernel_size_2,
+            stride=stride_2,
+            padding=padding_2,
+            dilation=dilation_2,
+            groups=groups
+        )
+
+    # Build the layers into a list first
+    layers = [layer_1, relu1, bn1, layer_2]
+
+    # Return the final sequential model
+    return nn.Sequential(*layers)
 
 class create_fc_head(nn.Module):
     """
