@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # Sklearn and other utilities
-from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
 from scipy.interpolate import make_interp_spline
@@ -58,7 +57,7 @@ class SynchronizationBlock(nn.Module):
 
         elif synchronization_method == 'sync_head_fc':
             self.sync_heads = nn.ModuleList([
-                create_fc_head(
+                synchronization_utils.create_fc_head(
                     input_size=window_lengths[sensor],      # L_in (raw)
                     output_size=self.L_common,    # L_out (common)
                     num_channels=num_channels[sensor],
@@ -270,57 +269,4 @@ class DesynchronizationBlock(nn.Module):
             sensor_desynchronizations.append(sensor_out)
         return sensor_desynchronizations
 
-class create_fc_head(nn.Module):
-    """
-    A fully-connected (FC) head that operates channel by channel.
 
-    This can be used for:
-      - Synchronization: map from a sensor's raw length L_sensor to a common length L_common.
-      - desynchronization: map from the common length L_common back to L_sensor.
-    
-    Shape:
-        - Input:  (N, C, L_in)
-        - Output: (N, C, L_out)
-    """
-
-    def __init__(self, input_size, output_size, num_channels, num_layers):
-        """
-        Args:
-            input_size (int): L_in
-            output_size (int): L_out
-            num_channels (int): C
-            num_layers (int): number of FC layers per channel
-        """
-        super().__init__()  # Corrected this line
-        self.fc_stacks = nn.ModuleList()
-
-        for _ in range(num_channels):
-            layers = []
-            current_size = input_size
-            for layer_idx in range(num_layers):
-                fc = nn.Linear(current_size, output_size)
-                layers.append(fc)
-
-                if layer_idx < num_layers - 1:
-                    layers.append(nn.ReLU())
-                    layers.append(nn.BatchNorm1d(output_size))
-
-                current_size = output_size
-
-            self.fc_stacks.append(nn.Sequential(*layers))
-
-    def forward(self, x):
-        """
-        Args:
-            x (torch.Tensor): (N, C, L_in)
-        
-        Returns:
-            torch.Tensor: (N, C, L_out)
-        """
-        outputs = []
-        for c in range(x.size(1)):
-            channel_input = x[:, c, :]
-            channel_output = self.fc_stacks[c](channel_input)
-            outputs.append(channel_output.unsqueeze(1))
-
-        return torch.cat(outputs, dim=1)

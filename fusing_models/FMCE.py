@@ -3,14 +3,14 @@ import torch.nn as nn
 import torch
 
 
-class RMCE(nn.Module):
+class FMCE(nn.Module):
     """
     Applies two sequential convolutional blocks (with dilation & skip connections)
     to the masked input, effectively fusing the masked representations.
     """
 
-    def __init__(self, total_channels, c_sync, c_fuse, kernel_size, sensors, num_channels):
-        super(RMCE, self).__init__()
+    def __init__(self, total_channels, c_sync, c_fuse, kernel_size):
+        super(FMCE, self).__init__()
         self.total_channels = total_channels
         self.c_sync = c_sync
 
@@ -85,16 +85,21 @@ class RMCE(nn.Module):
         returns: (B, C_total*c_sync, L) fused output
         """
         # generate random mask randomly masking out some channels of some sensors B, C, L
-        mask = torch.rand(size=(
-            x.shape[0], x.shape[1], x.shape[2]), dtype=torch.float32).to(x.device) > 0.95
-        x = x * mask
 
-        out_part1 = self.fusing_part1(x)
-        residual1 = self.residual_conv1(x)
-        out_part1 = out_part1 + residual1
+        outputs = []
+        for channel_to_mask in range(x.shape[1]):
+            mask = torch.ones_like(x)
+            mask[:, channel_to_mask, :] = 0
+            x_masked = x * mask
+            out_part1 = self.fusing_part1(x_masked)
+            residual1 = self.residual_conv1(x_masked)
+            out_part1 = out_part1 + residual1
 
-        out_part2 = self.fusing_part2(out_part1)
-        residual2 = self.residual_conv2(out_part1)
-        out_part2 = out_part2 + residual2
+            out_part2 = self.fusing_part2(out_part1)
+            residual2 = self.residual_conv2(out_part1)
+            out_part2 = out_part2 + residual2
+            outputs.append(out_part2[:, channel_to_mask, :])
+        
+        outputs = torch.stack(outputs, dim=1)
 
-        return out_part2
+        return outputs

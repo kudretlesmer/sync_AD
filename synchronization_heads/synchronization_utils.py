@@ -572,26 +572,22 @@ class create_fc_head(nn.Module):
             num_channels (int): C
             num_layers (int): number of FC layers per channel
         """
-        super(create_fc_head, self).__init__()
+        super().__init__()  # Corrected this line
         self.fc_stacks = nn.ModuleList()
 
-        # Create channel-specific FC stacks
         for _ in range(num_channels):
             layers = []
             current_size = input_size
             for layer_idx in range(num_layers):
-                # FC layer
                 fc = nn.Linear(current_size, output_size)
                 layers.append(fc)
 
-                # Add ReLU + BatchNorm except after the last layer
                 if layer_idx < num_layers - 1:
                     layers.append(nn.ReLU())
                     layers.append(nn.BatchNorm1d(output_size))
 
                 current_size = output_size
 
-            # Wrap in a Sequential
             self.fc_stacks.append(nn.Sequential(*layers))
 
     def forward(self, x):
@@ -604,10 +600,8 @@ class create_fc_head(nn.Module):
         """
         outputs = []
         for c in range(x.size(1)):
-            # Channel slice => (N, L_in)
             channel_input = x[:, c, :]
-            channel_output = self.fc_stacks[c](channel_input)  # (N, L_out)
-            outputs.append(channel_output.unsqueeze(1))        # (N, 1, L_out)
+            channel_output = self.fc_stacks[c](channel_input)
+            outputs.append(channel_output.unsqueeze(1))
 
-        # Concat the per-channel outputs => (N, C, L_out)
         return torch.cat(outputs, dim=1)
