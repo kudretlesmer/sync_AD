@@ -88,9 +88,10 @@ class FMCE(nn.Module):
 
         outputs = []
         for channel_to_mask in range(x.shape[1]):
-            mask = torch.ones_like(x)
-            mask[:, channel_to_mask, :] = 0
-            x_masked = x * mask
+            #mask = torch.ones_like(x)
+            #mask[:, channel_to_mask, :] = torch.rand_like(x[:, channel_to_mask, :])
+            x_masked = x.clone()
+            x_masked[:, channel_to_mask, :] = torch.rand_like(x[:, channel_to_mask, :]) 
             out_part1 = self.fusing_part1(x_masked)
             residual1 = self.residual_conv1(x_masked)
             out_part1 = out_part1 + residual1

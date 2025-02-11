@@ -602,6 +602,7 @@ def initialise_dataloaders(PARAMS):
     )
 
     # Set random seeds for reproducibility
+    np.random.seed(PARAMS['seed'])
     torch.manual_seed(PARAMS['seed'])
     if PARAMS['device'] == 'mps':
         torch.mps.manual_seed(PARAMS['seed'])

@@ -236,7 +236,7 @@ class DesynchronizationBlock(nn.Module):
             for sensor in sensors:
                 L_common = sync_head_conv_parameters[sensor]['input_2']
                 L_sensor = window_lengths[sensor]
-                proj_head = create_fc_head(
+                proj_head = synchronization_utils.create_fc_head(
                     input_size=L_common,
                     output_size=L_sensor,
                     num_channels=num_channels[sensor],
